@@ -101,12 +101,15 @@ PostCSS Plugins.
 
 ### inject
 
-Type: `boolean` `object`<br>
+Type: `boolean` `object` `function(cssVariableName, fileId): string`
+
 Default: `true`
 
 Inject CSS into `<head>`, it's always `false` when `extract: true`.
 
 You can also use it as options for [`style-inject`](https://github.com/egoist/style-inject#options).
+
+It can also be a `function` , returning a `string` which is js code.
 
 ### extract
 
@@ -244,9 +247,17 @@ module.exports = context => {
 }
 ```
 
+### to
+
+Type: `string`
+
+Destination CSS filename hint that could be used by PostCSS plugins, for example, 
+to properly resolve path, rebase and copy assets.
+
 ### use
 
-Type: `name[]` `[name, options][]`<br>
+Type: `name[]` `[name, options][]` `{ sass: options, stylus: options, less: options }`
+
 Default: `['sass', 'stylus', 'less']`
 
 Use a loader, currently built-in loaders are:
@@ -256,6 +267,9 @@ Use a loader, currently built-in loaders are:
 - `less` (Support `.less`)
 
 They are executed from right to left.
+
+If you pass the `object`, then its property `sass`, `stylus` and `less` will
+be pass in the corresponding loader.
 
 ### loaders
 

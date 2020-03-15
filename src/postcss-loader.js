@@ -2,7 +2,7 @@ import path from 'path'
 import importCwd from 'import-cwd'
 import postcss from 'postcss'
 import findPostcssConfig from 'postcss-load-config'
-import reserved from 'reserved-words'
+import { identifier } from 'safe-identifier'
 import humanlizePath from './utils/humanlize-path'
 import normalizePath from './utils/normalize-path'
 
@@ -40,10 +40,7 @@ function escapeClassNameDashes(str) {
 
 function ensureClassName(name) {
   name = escapeClassNameDashes(name)
-  if (reserved.check(name)) {
-    name = `$${name}$`
-  }
-  return name
+  return identifier(name, false)
 }
 
 function ensurePostCSSOption(option) {
@@ -75,7 +72,7 @@ export default {
     const autoModules = options.autoModules !== false && isModuleFile(this.id)
     const supportModules = options.modules || autoModules
     if (supportModules) {
-      plugins.push(
+      plugins.unshift(
         require('postcss-modules')({
           // In tests
           // Skip hash in names since css content on windows and linux would differ because of `new line` (\r?\n)
@@ -104,9 +101,10 @@ export default {
     const postcssOpts = {
       ...this.options.postcss,
       ...config.options,
+      // Allow overriding `to` for some plugins that are relying on this value
+      to: options.to || this.id,
       // Followings are never modified by user config config
       from: this.id,
-      to: this.id,
       map: this.sourceMap ?
         shouldExtract ?
           { inline: false, annotation: false } :
@@ -176,6 +174,7 @@ export default {
       }
     }
 
+    const cssVariableName = identifier('css', true)
     if (shouldExtract) {
       output += `export default ${JSON.stringify(modulesExported[this.id])};`
       extracted = {
@@ -184,16 +183,26 @@ export default {
         map: outputMap
       }
     } else {
-      output += `var css = ${JSON.stringify(res.css)};\nexport default ${
-        supportModules ? JSON.stringify(modulesExported[this.id]) : 'css'
-      };`
+      const module = supportModules ?
+        JSON.stringify(modulesExported[this.id]) :
+        cssVariableName
+      output +=
+        `var ${cssVariableName} = ${JSON.stringify(res.css)};\n` +
+        `export default ${module};\n` +
+        `export const stylesheet=${JSON.stringify(res.css)};`
     }
     if (!shouldExtract && shouldInject) {
-      output += `\nimport styleInject from '${styleInjectPath}';\nstyleInject(css${
-        Object.keys(options.inject).length > 0 ?
-          `,${JSON.stringify(options.inject)}` :
-          ''
-      });`
+      if (typeof options.inject === 'function') {
+        output += options.inject(cssVariableName, this.id)
+      } else {
+        output += '\n' +
+          `import styleInject from '${styleInjectPath}';\n` +
+          `styleInject(${cssVariableName}${
+            Object.keys(options.inject).length > 0 ?
+              `,${JSON.stringify(options.inject)}` :
+              ''
+          });`
+      }
     }
 
     return {

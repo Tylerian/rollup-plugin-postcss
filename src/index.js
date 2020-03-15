@@ -2,6 +2,7 @@ import path from 'path'
 import { createFilter } from 'rollup-pluginutils'
 import Concat from 'concat-with-sourcemaps'
 import Loaders from './loaders'
+import normalizePath from './utils/normalize-path'
 
 /**
  * The options that could be `boolean` or `object`
@@ -22,7 +23,7 @@ export default (options = {}) => {
   const sourceMap = options.sourceMap
   const postcssLoaderOptions = {
     /** Inject CSS as `<style>` to `<head>` */
-    inject: inferOption(options.inject, {}),
+    inject: typeof options.inject === 'function' ? options.inject : inferOption(options.inject, {}),
     /** Extract CSS */
     extract: typeof options.extract === 'undefined' ? false : options.extract,
     /** CSS modules */
@@ -34,6 +35,8 @@ export default (options = {}) => {
     minimize: inferOption(options.minimize, false),
     /** Postcss config file */
     config: inferOption(options.config, {}),
+    /** PostCSS target filename hint, for plugins that are relying on it */
+    to: options.to,
     /** PostCSS options */
     postcss: {
       parser: options.parser,
@@ -43,7 +46,16 @@ export default (options = {}) => {
       exec: options.exec
     }
   }
-  const use = options.use || ['sass', 'stylus', 'less']
+  let use = ['sass', 'stylus', 'less']
+  if (Array.isArray(options.use)) {
+    use = options.use
+  } else if (options.use !== null && typeof options.use === 'object') {
+    use = [
+      ['sass', options.use.sass || {}],
+      ['stylus', options.use.stylus || {}],
+      ['less', options.use.less || {}]
+    ]
+  }
   use.unshift(['postcss', postcssLoaderOptions])
 
   const loaders = new Loaders({
@@ -100,8 +112,20 @@ export default (options = {}) => {
       }
     },
 
-    async generateBundle(opts, bundle) {
+    augmentChunkHash() {
       if (extracted.size === 0) return
+      const extractedValue = Array.from(extracted).reduce((obj, [key, value]) => ({
+        ...obj,
+        [key]: value
+      }), {})
+      return JSON.stringify(extractedValue)
+    },
+
+    async generateBundle(opts, bundle) {
+      if (
+        extracted.size === 0 ||
+        !(opts.dir || opts.file)
+      ) return
 
       // TODO: support `[hash]`
       const dir = opts.dir || path.dirname(opts.file)
@@ -114,11 +138,11 @@ export default (options = {}) => {
       const getExtracted = () => {
         const fileName =
           typeof postcssLoaderOptions.extract === 'string' ?
-            path.relative(dir, postcssLoaderOptions.extract) :
+            normalizePath(path.relative(dir, postcssLoaderOptions.extract)) :
             `${path.basename(file, path.extname(file))}.css`
         const concat = new Concat(true, fileName, '\n')
         const entries = Array.from(extracted.values())
-        const { modules } = bundle[path.relative(dir, file)]
+        const { modules } = bundle[normalizePath(path.relative(dir, file))]
 
         if (modules) {
           const fileList = Object.keys(modules)
@@ -127,7 +151,7 @@ export default (options = {}) => {
           )
         }
         for (const res of entries) {
-          const relative = path.relative(dir, res.id)
+          const relative = normalizePath(path.relative(dir, res.id))
           const map = res.map || null
           if (map) {
             map.file = fileName
